@@ -1,8 +1,5 @@
 
-// https://github.com/microsoft/onnxruntime/blob/v1.8.2/csharp/test/Microsoft.ML.OnnxRuntime.EndToEndTests.Capi/CXX_Api_Sample.cpp
-// https://github.com/microsoft/onnxruntime/blob/v1.8.2/include/onnxruntime/core/session/onnxruntime_cxx_api.h
-#include <onnxruntime_cxx_api.h>
-
+#include <onnxruntime/onnxruntime_cxx_api.h>
 #include <opencv2/dnn/dnn.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
@@ -129,48 +126,24 @@ std::vector<std::string> readLabels(std::string& labelFilepath)
     return labels;
 }
 
+void usage(const char *pApp)
+{
+	std::cout<<"./"<<pApp<<" "<<"<onnxModelFilePath> <imgFilePath> <labelFilePath>"<<std::endl;
+}
+
 int main(int argc, char* argv[])
 {
-    const int64_t batchSize = 2;
-    bool useCUDA{true};
-    const char* useCUDAFlag = "--use_cuda";
-    const char* useCPUFlag = "--use_cpu";
-    if (argc == 1)
-    {
-        useCUDA = false;
-    }
-    else if ((argc == 2) && (strcmp(argv[1], useCUDAFlag) == 0))
-    {
-        useCUDA = true;
-    }
-    else if ((argc == 2) && (strcmp(argv[1], useCPUFlag) == 0))
-    {
-        useCUDA = false;
-    }
-    else if ((argc == 2) && (strcmp(argv[1], useCUDAFlag) != 0))
-    {
-        useCUDA = false;
-    }
-    else
-    {
-        throw std::runtime_error{"Too many arguments."};
-    }
-
-    if (useCUDA)
-    {
-        std::cout << "Inference Execution Provider: CUDA" << std::endl;
-    }
-    else
-    {
-        std::cout << "Inference Execution Provider: CPU" << std::endl;
-    }
-
+    //const int64_t batchSize = 2;
+	const int64_t batchSize = 1;
+        if(argc !=4)
+	{
+		usage(argv[0]);
+		return 0;
+	}
     std::string instanceName{"image-classification-inference"};
-    // std::string modelFilepath{"../../data/models/squeezenet1.1-7.onnx"};
-    std::string modelFilepath{"../../data/models/resnet18-v1-7.onnx"};
-    std::string imageFilepath{
-        "../../data/images/european-bee-eater-2115564_1920.jpg"};
-    std::string labelFilepath{"../../data/labels/synset.txt"};
+    std::string modelFilepath{argv[1]};
+    std::string imageFilepath{argv[2]};
+    std::string labelFilepath{argv[3]};
 
     std::vector<std::string> labels{readLabels(labelFilepath)};
 
@@ -178,13 +151,6 @@ int main(int argc, char* argv[])
                  instanceName.c_str());
     Ort::SessionOptions sessionOptions;
     sessionOptions.SetIntraOpNumThreads(1);
-    if (useCUDA)
-    {
-        // Using CUDA backend
-        // https://github.com/microsoft/onnxruntime/blob/v1.8.2/include/onnxruntime/core/session/onnxruntime_cxx_api.h#L329
-        OrtCUDAProviderOptions cuda_options{};
-        sessionOptions.AppendExecutionProvider_CUDA(cuda_options);
-    }
 
     // Sets graph optimization level
     // Available levels are
@@ -196,14 +162,17 @@ int main(int argc, char* argv[])
     sessionOptions.SetGraphOptimizationLevel(
         GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
 
-    Ort::Session session(env, modelFilepath.c_str(), sessionOptions);
+    std::chrono::steady_clock::time_point start= std::chrono::steady_clock::now();
+	Ort::Session session(env, modelFilepath.c_str(), sessionOptions);
+    std::chrono::steady_clock::time_point end= std::chrono::steady_clock::now();
+    std::cout<<"Model Loading time:"<<std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()<<std::endl;
 
     Ort::AllocatorWithDefaultOptions allocator;
 
     size_t numInputNodes = session.GetInputCount();
     size_t numOutputNodes = session.GetOutputCount();
 
-    const char* inputName = session.GetInputName(0, allocator);
+	const auto inputName = session.GetInputNameAllocated(0, allocator);
 
     Ort::TypeInfo inputTypeInfo = session.GetInputTypeInfo(0);
     auto inputTensorInfo = inputTypeInfo.GetTensorTypeAndShapeInfo();
@@ -218,7 +187,7 @@ int main(int argc, char* argv[])
         inputDims.at(0) = batchSize;
     }
 
-    const char* outputName = session.GetOutputName(0, allocator);
+    const auto outputName = session.GetOutputNameAllocated(0, allocator);
 
     Ort::TypeInfo outputTypeInfo = session.GetOutputTypeInfo(0);
     auto outputTensorInfo = outputTypeInfo.GetTensorTypeAndShapeInfo();
@@ -235,10 +204,10 @@ int main(int argc, char* argv[])
 
     std::cout << "Number of Input Nodes: " << numInputNodes << std::endl;
     std::cout << "Number of Output Nodes: " << numOutputNodes << std::endl;
-    std::cout << "Input Name: " << inputName << std::endl;
+ 	std::cout << "Input Name: " << inputName.get() << std::endl;
     std::cout << "Input Type: " << inputType << std::endl;
     std::cout << "Input Dimensions: " << inputDims << std::endl;
-    std::cout << "Output Name: " << outputName << std::endl;
+	std::cout << "Output Name: " << outputName.get() << std::endl;
     std::cout << "Output Type: " << outputType << std::endl;
     std::cout << "Output Dimensions: " << outputDims << std::endl;
 
@@ -278,9 +247,9 @@ int main(int argc, char* argv[])
             labels.size() * batchSize == outputTensorSize));
     std::vector<float> outputTensorValues(outputTensorSize);
 
-    std::vector<const char*> inputNames{inputName};
-    std::vector<const char*> outputNames{outputName};
-    std::vector<Ort::Value> inputTensors;
+    std::vector<const char*> inputNames{inputName.get()};
+	std::vector<const char*> outputNames{outputName.get()};
+	std::vector<Ort::Value> inputTensors;
     std::vector<Ort::Value> outputTensors;
 
     Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu(
@@ -339,7 +308,7 @@ int main(int argc, char* argv[])
                     inputTensors.data(), 1, outputNames.data(),
                     outputTensors.data(), 1);
     }
-    std::chrono::steady_clock::time_point end =
+    end =
         std::chrono::steady_clock::now();
     std::cout << "Minimum Inference Latency: "
               << std::chrono::duration_cast<std::chrono::milliseconds>(end -
